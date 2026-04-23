@@ -1,51 +1,73 @@
+import streamlit as st
 import pandas as pd
-import matplotlib.pyplot as plt
-import seaborn as sns
-from sklearn.preprocessing import LabelEncoder
-from sklearn.model_selection import train_test_split
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import accuracy_score
+import pickle
 
-# Load data
-data = pd.read_csv("C:\\Users\\rohit\\Desktop\\ML Presentation\\matches.csv")
+st.set_page_config(page_title="IPL Predictor", layout="centered")
 
-# Drop useless column and null rows
-if "umpire3" in data.columns:
-    data.drop("umpire3", axis=1, inplace=True)
-data.dropna(inplace=True)
+st.title("🏏 IPL Match Winner Predictor")
+st.info("Predict winner using teams, toss, venue, city, and season.")
 
-# Replace old team names
-data["team1"] = data["team1"].replace("Delhi Daredevils", "Delhi Capitals")
-data["team2"] = data["team2"].replace("Delhi Daredevils", "Delhi Capitals")
-data["winner"] = data["winner"].replace("Delhi Daredevils", "Delhi Capitals")
+# Load saved files
+with open("model.pkl", "rb") as f:
+    model = pickle.load(f)
 
-data["team1"] = data["team1"].replace("Deccan Chargers", "Sunrisers Hyderabad")
-data["team2"] = data["team2"].replace("Deccan Chargers", "Sunrisers Hyderabad")
-data["winner"] = data["winner"].replace("Deccan Chargers", "Sunrisers Hyderabad")
+with open("columns.pkl", "rb") as f:
+    columns = pickle.load(f)
 
-# Drop unnecessary columns
-drop_cols = ["id", "season", "city", "date", "player_of_match", "venue", "umpire1", "umpire2"]
-drop_cols = [col for col in drop_cols if col in data.columns]
-data.drop(drop_cols, axis=1, inplace=True)
+with open("label_encoder.pkl", "rb") as f:
+    label_encoder = pickle.load(f)
 
-# Features and target
-X = data.drop("winner", axis=1)
-y = data["winner"]
+# Load dataset
+data = pd.read_csv("matches.csv")
 
-# Encoding
-X = pd.get_dummies(X, columns=["team1", "team2", "toss_winner", "toss_decision", "result"], drop_first=True)
-le = LabelEncoder()
-y = le.fit_transform(y)
+# Clean names
+data.replace({
+    "Delhi Daredevils": "Delhi Capitals",
+    "Kings XI Punjab": "Punjab Kings"
+}, inplace=True)
 
-# Split data
-x_train, x_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+# Dropdown values
+teams = sorted(set(data["team1"]).union(set(data["team2"])))
+venues = sorted(data["venue"].dropna().unique())
+cities = sorted(data["city"].dropna().unique())
+seasons = sorted(data["season"].dropna().unique())
 
-# Train model
-model = RandomForestClassifier(n_estimators=200, min_samples_split=3, max_features="sqrt", random_state=42)
-model.fit(x_train, y_train)
+# UI
+team1 = st.selectbox("Team 1", teams)
+team2 = st.selectbox("Team 2", [t for t in teams if t != team1])
+toss_winner = st.selectbox("Toss Winner", [team1, team2])
+toss_decision = st.selectbox("Toss Decision", ["bat", "field"])
+venue = st.selectbox("Venue", venues)
+city = st.selectbox("City", cities)
+season = st.selectbox("Season", seasons)
 
-# Predict
-y_pred = model.predict(x_test)
+if st.button("Predict Winner"):
 
-# Accuracy
-print("Accuracy:", accuracy_score(y_test, y_pred))
+    # Feature engineering
+    is_toss_winner_batting = 1 if toss_winner == team1 else 0
+
+    # Create input dataframe
+    input_df = pd.DataFrame([{
+        "team1": team1,
+        "team2": team2,
+        "toss_winner": toss_winner,
+        "toss_decision": toss_decision,
+        "venue": venue,
+        "city": city,
+        "season": season,
+        "is_toss_winner_batting": is_toss_winner_batting
+    }])
+
+    # One-hot encode input
+    input_encoded = pd.get_dummies(input_df)
+
+    # Match training columns
+    input_encoded = input_encoded.reindex(columns=columns, fill_value=0)
+
+    # Predict
+    prediction = model.predict(input_encoded)
+
+    # Decode predicted winner
+    winner = label_encoder.inverse_transform(prediction)[0]
+
+    st.success(f"🏆 Predicted Winner: {winner}")
